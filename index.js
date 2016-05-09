@@ -114,6 +114,7 @@ module.exports = function(services) {
   return {
       feed: followStream,
       addUser: addUserToAnalysisQueue,
-      analyzeUser: analyzeUserTweets
+      analyzeUser: analyzeUserTweets,
+      analyzeText: analyzeText
   };  
 }
