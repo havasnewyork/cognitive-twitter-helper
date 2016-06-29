@@ -79,7 +79,7 @@ module.exports = function(services) {
       
       var handleTweets = function(err, tweets){
         // console.log(tweets);
-        console.log(screen_name, 'user fetch tweet count:', tweets.length);
+        // console.log(screen_name, 'user fetch tweet count:', tweets.length);
         var last = _.last(tweets);
         // console.log('last tweet k:', last.id);
         if (!last && !params.max_id) return done("no tweets to analyze");
