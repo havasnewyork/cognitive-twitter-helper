@@ -8,13 +8,20 @@ module.exports = function(services) {
 
 
 
-  var creds = services;
-  if (!creds.personality_insights) throw new Error("no personality insights credentials found");
-  var pi_creds = creds.personality_insights[0];
-  pi_creds.credentials.version = "v2";
+  var creds = services, pi_creds;
+  if (creds.username && creds.password) {
+    pi_creds = creds;
+  } else if (creds.personality_insights) {
+    pi_creds = creds.personality_insights[0].credentials;  
+  } else {
+    throw new Error("no personality insights credentials found");
+  }
+  // console.log('pi_creds:', )
+  pi_creds.version = "v2";
   // console.log('using pi creds:', pi_creds.credentials);
-  var personality_insights = watson.personality_insights(pi_creds.credentials);
+  var personality_insights = watson.personality_insights(pi_creds);
 
+  if (!process.env.TWITTER_CONSUMER_KEY) throw new Error('no twitter keys found in .env');
   var client = new Twitter({
     consumer_key: process.env.TWITTER_CONSUMER_KEY,
     consumer_secret: process.env.TWITTER_CONSUMER_SECRET,
