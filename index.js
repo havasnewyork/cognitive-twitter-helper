@@ -1,26 +1,48 @@
-module.exports = function(services) {
+module.exports = function(services,alt_service_creds) {
   
   var watson = require('watson-developer-cloud');
   var Twitter = require('twitter');
   var _ = require('lodash');
-
+  var async = require('async');
+  
   var pi_utils = require('./lib/personality-util'); // flatten, similarity, matches
+  var twitterEmoticons = require('./lib/twitter-emoticons'); // translates emoticons
 
 
 
-  var creds = services, pi_creds;
+  var creds = services, pi_creds, a_creds;
   if (creds.username && creds.password) {
     pi_creds = creds;
   } else if (creds.personality_insights) {
     pi_creds = creds.personality_insights[0].credentials;  
   } else {
-    throw new Error("no personality insights credentials found");
+    throw new Error("no personality_insights credentials found");
   }
-  // console.log('pi_creds:', )
   pi_creds.version = "v2";
-  // console.log('using pi creds:', pi_creds.credentials);
+  // console.log('using personality insights creds:', pi_creds);
   var personality_insights = watson.personality_insights(pi_creds);
 
+  
+  if (creds.alchemy_api) {
+      a_creds = creds.alchemy_api[0].credentials;  
+  } else if (alt_service_creds) {
+      creds = alt_service_creds;
+      if (creds.apikey) {
+          a_creds = creds;
+      } else if (creds.alchemy_api) {
+          a_creds = creds.alchemy_api[0].credentials;  
+      }
+  }
+  if (!a_creds) {
+      throw new Error("no alchemy_api credentials found");
+  }
+  // console.log('using alchemy language creds:', a_creds);
+  var alchemy_language = watson.alchemy_language(a_creds);
+
+
+  
+  
+  
   if (!process.env.TWITTER_CONSUMER_KEY) throw new Error('no twitter keys found in .env');
   var client = new Twitter({
     consumer_key: process.env.TWITTER_CONSUMER_KEY,
@@ -59,15 +81,13 @@ module.exports = function(services) {
   }
 
   var getTweets = function(opts, cb) {
-        client.get('statuses/user_timeline', opts, function(error, tweets, response){
+      client.get('statuses/user_timeline', opts, function(error, tweets, response){
             // console.log('client get user:', error, tweets, response);
           if (error) return cb(error);
           cb(null, tweets);
-        });
-      }
-
-  // 
-  var analyzeUserTweets = function(screen_name, done) {
+      });
+  }
+  var getUserTweets = function(screen_name, minWordCount, done) {
       var params = {
           screen_name: screen_name,
           include_rts: false,
@@ -76,7 +96,7 @@ module.exports = function(services) {
           // IF we didn't get enough words yet...
       };
 
-      var text = "";
+      var text = '';
 
       // TODO manage rate limits
       // Requests / 15-min window 
@@ -87,41 +107,124 @@ module.exports = function(services) {
       var handleTweets = function(err, tweets){
         // console.log(tweets);
         // console.log(screen_name, 'user fetch tweet count:', tweets.length);
-        var last = _.last(tweets);
+        var last = false;
+        if (tweets)
+            last = _.last(tweets);
         // console.log('last tweet k:', last.id);
+        
+        if (err && text == '') return done(err);
+
         if (!last && !params.max_id) return done("no tweets to analyze");
         text += _.map(tweets, 'text').join(' ');
         var wc = text.split(' ').length;
-        console.log(screen_name, 'WORD COUNT:', wc);
+//        console.log(screen_name, 'WORD COUNT:', wc);
         // if not enough words and we still have more tweets to fetch 
         // -- our WC is not so accurate so we pad
-        if ((wc < 4000) && (params.max_id !== last.id)) {
-          console.log('not enough words but we have more tweets we can fetch');
+        if ((wc < minWordCount) && (params.max_id !== last.id)) {
+//          console.log('not enough words but we have more tweets we can fetch');
           params.max_id = last.id;
           getTweets(params, handleTweets);
         } else {
+            text = twitterEmoticons.massage(text);
+//            console.log('*** got some text:', text);
+            done(null,text,wc);
+        } 
+      }
+      getTweets(params, handleTweets);
+  }
+  // 
+  var analyzeUserTweets = function(screen_name, done) {
+      getUserTweets( screen_name, 4000, function(err, text, wc){
           // will be called even if wc is lower if we run out of tweets. then we can rely on the PI errors for wc
           analyzeText(text, function(err, results){
-            console.log('got some results:', err, results);
-            if (!err) results.flat = pi_utils.flatten(results.tree);
-            done(err, results);
-          })
-        } 
-
-        
-      }
-
-      getTweets(params, handleTweets);
+//              console.log('got some results:', err, results);
+              done(err, results);
+          });
+      });
+  }
+  var analyzeUserTweetsEmotion = function(screen_name, done) {
+      getUserTweets( screen_name, 4000, function(err, text, wc){
+          analyzeTextEmotion(text, function(err, results){
+              done(err, results);
+          });
+      });
+  }
+  var analyzeUserTweetsPersonality = function(screen_name, done) {
+      getUserTweets( screen_name, 4000, function(err, text, wc){
+          analyzeTextPersonality(text, function(err, results){
+              done(err, results);
+          });
+      });
+  }
+  var analyzeUserTweetsSentiment = function(screen_name, done) {
+      getUserTweets( screen_name, 4000, function(err, text, wc){
+          analyzeTextSentiment(text, function(err, results){
+              done(err, results);
+          });
+      });
   }
 
   var analyzeText = function(text, done) {
-    personality_insights.profile({text: text}, done);
+      async.parallel({
+          emotion: function(callback) {
+              analyzeTextEmotion(text,callback);
+          },
+          personality: function(callback) {
+              analyzeTextPersonality(text,callback);
+          },
+          sentiment: function(callback) {
+              analyzeTextSentiment(text,callback);
+          }
+      }, function(err, results) {
+          if (err)
+              console.log('analyzeText ERROR:', err);
+          else
+              console.log('analyzeText results:', JSON.stringify(results, null, 2));
+          done(err, results);
+      });
   }
-
+  var analyzeTextEmotion = function(text, done) {
+      alchemy_language.emotion({text: text}, function (err, response) {
+//        if (err)
+//            console.log('alchemy_language.emotion ERROR:', err);
+//        else
+//            console.log('alchemy_language.emotion response:', JSON.stringify(response, null, 2));
+          done(err, response);
+      });
+  }
+  var analyzeTextPersonality = function(text, done) {
+      personality_insights.profile({text: text}, function(err, response){
+          if (err) {
+//              console.log('personality_insights.profile ERROR:', err);
+          } else {
+//              console.log('personality_insights.profile response:', JSON.stringify(response, null, 2));
+              response.flat = pi_utils.flatten(response.tree);
+          }
+          done(err, response);
+      });
+  }
+  var analyzeTextSentiment = function(text, done) {
+      alchemy_language.sentiment({text: text}, function (err, response) {
+//        if (err)
+//            console.log('alchemy_language.sentiment ERROR:', err);
+//        else
+//            console.log('alchemy_language.sentiment response:', JSON.stringify(response, null, 2));
+          done(err, response);
+      });
+  }
+  
   return {
       feed: followStream,
       addUser: addUserToAnalysisQueue,
+      
       analyzeUser: analyzeUserTweets,
-      analyzeText: analyzeText
+      analyzeUserEmotion: analyzeUserTweetsEmotion,
+      analyzeUserPersonality: analyzeUserTweetsPersonality,
+      analyzeUserSentiment: analyzeUserTweetsSentiment,
+      
+      analyzeText: analyzeText,
+      analyzeTextEmotion: analyzeTextEmotion,
+      analyzeTextPersonality: analyzeTextPersonality,
+      analyzeTextSentiment: analyzeTextSentiment
   };  
 }
