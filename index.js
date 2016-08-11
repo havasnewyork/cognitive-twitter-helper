@@ -217,12 +217,14 @@ module.exports = function(services,alt_service_creds) {
       feed: followStream,
       addUser: addUserToAnalysisQueue,
       
-      analyzeUser: analyzeUserTweets,
+      analyzeUser: analyzeUserTweetsPersonality, // old functionality
+      analyzeUserAll: analyzeUserTweets,
       analyzeUserEmotion: analyzeUserTweetsEmotion,
       analyzeUserPersonality: analyzeUserTweetsPersonality,
       analyzeUserSentiment: analyzeUserTweetsSentiment,
       
-      analyzeText: analyzeText,
+      analyzeText: analyzeTextPersonality, // old functionality
+      analyzeTextAll: analyzeText,
       analyzeTextEmotion: analyzeTextEmotion,
       analyzeTextPersonality: analyzeTextPersonality,
       analyzeTextSentiment: analyzeTextSentiment
